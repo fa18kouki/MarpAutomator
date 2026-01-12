@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { ArrowLeft, FileText } from 'lucide-react';
 import Link from 'next/link';
 import CanvaEditor, { type SlideData, slidesToMarp } from '@/components/CanvaEditor';
+import ExportModal from '@/components/ExportModal';
 import { useStore } from '@/store/useStore';
 import { generateFullHtml } from '@/lib/marp';
 
@@ -17,6 +18,7 @@ function EditorContent() {
   const [documentTitle, setDocumentTitle] = useState('新しい資料');
   const [isSaving, setIsSaving] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
   const [previewHtml, setPreviewHtml] = useState('');
 
   // 初期スライドの作成
@@ -130,8 +132,13 @@ function EditorContent() {
     setShowPreview(true);
   };
 
-  // エクスポート処理
+  // エクスポートモーダルを開く
   const handleExport = () => {
+    setShowExportModal(true);
+  };
+
+  // HTMLエクスポート処理
+  const handleExportHtml = () => {
     const marpContent = slidesToMarp(slides);
     const html = generateFullHtml(marpContent);
 
@@ -215,6 +222,15 @@ function EditorContent() {
           </div>
         </div>
       )}
+
+      {/* エクスポートモーダル */}
+      <ExportModal
+        isOpen={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        slides={slides}
+        title={documentTitle}
+        onExportHtml={handleExportHtml}
+      />
     </div>
   );
 }
