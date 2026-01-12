@@ -1,0 +1,136 @@
+import type { Preset } from '@/types';
+
+// プリセット定義
+export const presets: Preset[] = [
+  {
+    id: 'business-presentation',
+    name: 'ビジネスプレゼンテーション',
+    description: 'ビジネス会議や提案書に最適なプリセット',
+    theme: 'default',
+    templateIds: [
+      'title-centered',
+      'content-agenda',
+      'content-basic',
+      'content-two-column',
+      'content-stats',
+      'comparison-table',
+      'timeline-roadmap',
+      'closing-thankyou',
+    ],
+  },
+  {
+    id: 'tech-pitch',
+    name: '技術ピッチ',
+    description: 'スタートアップやテック企業向けのピッチデッキ',
+    theme: 'gradient',
+    templateIds: [
+      'title-gradient',
+      'content-feature',
+      'content-icon-grid',
+      'code-single',
+      'content-stats',
+      'timeline-horizontal',
+      'comparison-versus',
+      'closing-thankyou',
+    ],
+  },
+  {
+    id: 'educational',
+    name: '教育・セミナー',
+    description: '教育現場やセミナーで使えるプリセット',
+    theme: 'clean',
+    templateIds: [
+      'title-minimal',
+      'content-basic',
+      'content-numbered',
+      'list-nested',
+      'image-left-text',
+      'content-process',
+      'quote-centered',
+      'closing-thankyou',
+    ],
+  },
+  {
+    id: 'product-launch',
+    name: '製品発表',
+    description: '新製品やサービスの発表用プリセット',
+    theme: 'modern',
+    templateIds: [
+      'title-image-bg',
+      'content-highlight',
+      'image-center',
+      'split-cards',
+      'content-feature',
+      'list-pros-cons',
+      'content-stats',
+      'closing-thankyou',
+    ],
+  },
+  {
+    id: 'project-status',
+    name: 'プロジェクト状況報告',
+    description: '定例会議やステータス報告用のプリセット',
+    theme: 'default',
+    templateIds: [
+      'title-left',
+      'content-agenda',
+      'list-checklist',
+      'timeline-roadmap',
+      'content-stats',
+      'comparison-before-after',
+      'list-timeline-vertical',
+      'closing-thankyou',
+    ],
+  },
+  {
+    id: 'creative',
+    name: 'クリエイティブ',
+    description: 'デザインやクリエイティブなプレゼン向け',
+    theme: 'gradient',
+    templateIds: [
+      'title-gradient',
+      'image-fullscreen',
+      'image-gallery',
+      'split-50-50',
+      'quote-highlighted',
+      'content-icon-grid',
+      'split-asymmetric',
+      'closing-thankyou',
+    ],
+  },
+  {
+    id: 'developer',
+    name: '開発者向け',
+    description: '技術的な内容やコードを含むプレゼン向け',
+    theme: 'dark',
+    templateIds: [
+      'title-minimal',
+      'content-basic',
+      'code-single',
+      'code-comparison',
+      'content-process',
+      'list-bullet',
+      'comparison-table',
+      'closing-thankyou',
+    ],
+  },
+  {
+    id: 'minimal',
+    name: 'ミニマル',
+    description: 'シンプルでクリーンなプレゼン向け',
+    theme: 'minimal',
+    templateIds: [
+      'title-minimal',
+      'content-basic',
+      'content-highlight',
+      'list-bullet',
+      'quote-centered',
+      'closing-thankyou',
+    ],
+  },
+];
+
+// IDでプリセットを取得
+export const getPresetById = (id: string): Preset | undefined => {
+  return presets.find((p) => p.id === id);
+};
