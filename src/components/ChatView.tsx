@@ -8,7 +8,7 @@ import ChatMessage from './ChatMessage';
 import PresetSelector from './PresetSelector';
 import { initGemini, createSlidesFromChat } from '@/lib/gemini';
 import { combineSlides, generateFullHtml } from '@/lib/marp';
-import { getTemplateById, slideTemplates } from '@/templates/slideTemplates';
+import { slideTemplates } from '@/templates/slideTemplates';
 
 interface ChatViewProps {
   onPreviewDocument?: (html: string, title: string) => void;

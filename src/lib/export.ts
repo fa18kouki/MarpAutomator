@@ -58,6 +58,16 @@ export async function exportSlidesToPng(
         img.style.height = '100%';
         img.style.objectFit = 'cover';
         img.crossOrigin = 'anonymous';
+        // Wait for image to load before appending
+        await new Promise<void>((resolve) => {
+          img.onload = () => resolve();
+          img.onerror = () => {
+            console.warn('Failed to load image:', element.src);
+            resolve(); // Continue even if image fails to load
+          };
+          // Timeout after 5 seconds
+          setTimeout(() => resolve(), 5000);
+        });
         el.appendChild(img);
       } else if (element.type === 'shape') {
         el.style.backgroundColor = element.style.backgroundColor;
@@ -89,8 +99,14 @@ export async function exportSlidesToPng(
     });
 
     // PNG Blobを取得
-    const blob = await new Promise<Blob>((resolve) => {
-      canvas.toBlob((b) => resolve(b!), 'image/png', quality);
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((b) => {
+        if (b) {
+          resolve(b);
+        } else {
+          reject(new Error('Failed to create blob from canvas'));
+        }
+      }, 'image/png', quality);
     });
 
     // ZIPに追加

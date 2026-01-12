@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import {
   X,
   Maximize,
@@ -21,6 +21,42 @@ export default function PreviewModal({ item, onClose }: PreviewModalProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [currentSlide, setCurrentSlide] = useState(0);
   const [totalSlides, setTotalSlides] = useState(0);
+
+  // Define navigateToSlide first as it's used by nextSlide and prevSlide
+  const navigateToSlide = useCallback((index: number) => {
+    try {
+      const iframe = iframeRef.current;
+      if (iframe?.contentWindow) {
+        iframe.contentWindow.postMessage({ type: 'NAVIGATE_SLIDE', index }, '*');
+      }
+    } catch (error) {
+      console.error('Failed to navigate slide:', error);
+    }
+  }, []);
+
+  // Define nextSlide using useCallback
+  const nextSlide = useCallback(() => {
+    setCurrentSlide((prev) => {
+      if (prev < totalSlides - 1) {
+        const next = prev + 1;
+        navigateToSlide(next);
+        return next;
+      }
+      return prev;
+    });
+  }, [totalSlides, navigateToSlide]);
+
+  // Define prevSlide using useCallback
+  const prevSlide = useCallback(() => {
+    setCurrentSlide((prev) => {
+      if (prev > 0) {
+        const next = prev - 1;
+        navigateToSlide(next);
+        return next;
+      }
+      return prev;
+    });
+  }, [navigateToSlide]);
 
   useEffect(() => {
     if (!item) return;
@@ -44,32 +80,7 @@ export default function PreviewModal({ item, onClose }: PreviewModalProps) {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isFullscreen, currentSlide, totalSlides]);
-
-  const nextSlide = () => {
-    if (currentSlide < totalSlides - 1) {
-      setCurrentSlide((prev) => prev + 1);
-      navigateToSlide(currentSlide + 1);
-    }
-  };
-
-  const prevSlide = () => {
-    if (currentSlide > 0) {
-      setCurrentSlide((prev) => prev - 1);
-      navigateToSlide(currentSlide - 1);
-    }
-  };
-
-  const navigateToSlide = (index: number) => {
-    try {
-      const iframe = iframeRef.current;
-      if (iframe?.contentWindow) {
-        iframe.contentWindow.postMessage({ type: 'NAVIGATE_SLIDE', index }, '*');
-      }
-    } catch (error) {
-      console.error('Failed to navigate slide:', error);
-    }
-  };
+  }, [isFullscreen, nextSlide, prevSlide]);
 
   const handleDownload = () => {
     if (!item) return;

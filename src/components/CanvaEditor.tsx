@@ -20,22 +20,16 @@ import {
   Redo,
   ZoomIn,
   ZoomOut,
-  Move,
-  MousePointer,
   AlignLeft,
   AlignCenter,
   AlignRight,
-  AlignJustify,
   Bold,
   Italic,
   Underline,
-  ChevronDown,
-  Grip,
-  X,
   Search,
-  Upload,
+  Link,
 } from 'lucide-react';
-import { availableFonts, getFontsByCategory, fontCategoryNames, type FontOption } from '@/lib/fonts';
+import { availableFonts, fontCategoryNames, type FontOption } from '@/lib/fonts';
 
 // 要素の種類
 type ElementType = 'text' | 'image' | 'shape';
@@ -129,6 +123,13 @@ interface CanvaEditorProps {
   onExport?: () => void;
 }
 
+// History entry for undo/redo
+interface HistoryEntry {
+  slides: SlideData[];
+  selectedElementId: string | null;
+  currentSlideIndex: number;
+}
+
 export default function CanvaEditor({
   slides,
   onSlidesChange,
@@ -144,12 +145,84 @@ export default function CanvaEditor({
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [isResizing, setIsResizing] = useState(false);
   const [resizeHandle, setResizeHandle] = useState<string | null>(null);
+  const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, width: 0, height: 0, elementX: 0, elementY: 0 });
   const [fontSearch, setFontSearch] = useState('');
   const [fontCategory, setFontCategory] = useState<FontOption['category'] | 'all'>('all');
+  const [showImageUrlModal, setShowImageUrlModal] = useState(false);
+  const [imageUrlInput, setImageUrlInput] = useState('');
   const canvasRef = useRef<HTMLDivElement>(null);
+
+  // Undo/Redo history using refs to avoid effect-in-effect setState issues
+  const historyRef = useRef<HistoryEntry[]>([]);
+  const historyIndexRef = useRef(-1);
+  const isUndoRedoAction = useRef(false);
+  const [canUndoRedo, setCanUndoRedo] = useState({ canUndo: false, canRedo: false });
 
   const currentSlide = slides[currentSlideIndex];
   const selectedElement = currentSlide?.elements.find(el => el.id === selectedElementId);
+
+  // Track history for undo/redo - using ref to avoid cascading renders
+  const prevSlidesRef = useRef<string>('');
+  useEffect(() => {
+    const slidesJson = JSON.stringify(slides);
+    if (slidesJson === prevSlidesRef.current) return;
+    prevSlidesRef.current = slidesJson;
+
+    if (isUndoRedoAction.current) {
+      isUndoRedoAction.current = false;
+      return;
+    }
+
+    const newEntry: HistoryEntry = {
+      slides: JSON.parse(slidesJson),
+      selectedElementId,
+      currentSlideIndex,
+    };
+
+    const newHistory = historyRef.current.slice(0, historyIndexRef.current + 1);
+    historyRef.current = [...newHistory, newEntry].slice(-50);
+    historyIndexRef.current = Math.min(historyIndexRef.current + 1, 49);
+
+    // Update canUndo/canRedo state
+    setCanUndoRedo({
+      canUndo: historyIndexRef.current > 0,
+      canRedo: historyIndexRef.current < historyRef.current.length - 1,
+    });
+  }, [slides, selectedElementId, currentSlideIndex]);
+
+  // Undo function
+  const undo = useCallback(() => {
+    if (historyIndexRef.current <= 0) return;
+
+    isUndoRedoAction.current = true;
+    const prevEntry = historyRef.current[historyIndexRef.current - 1];
+    historyIndexRef.current = historyIndexRef.current - 1;
+    onSlidesChange(JSON.parse(JSON.stringify(prevEntry.slides)));
+    setSelectedElementId(prevEntry.selectedElementId);
+    setCurrentSlideIndex(prevEntry.currentSlideIndex);
+    setCanUndoRedo({
+      canUndo: historyIndexRef.current > 0,
+      canRedo: historyIndexRef.current < historyRef.current.length - 1,
+    });
+  }, [onSlidesChange]);
+
+  // Redo function
+  const redo = useCallback(() => {
+    if (historyIndexRef.current >= historyRef.current.length - 1) return;
+
+    isUndoRedoAction.current = true;
+    const nextEntry = historyRef.current[historyIndexRef.current + 1];
+    historyIndexRef.current = historyIndexRef.current + 1;
+    onSlidesChange(JSON.parse(JSON.stringify(nextEntry.slides)));
+    setSelectedElementId(nextEntry.selectedElementId);
+    setCurrentSlideIndex(nextEntry.currentSlideIndex);
+    setCanUndoRedo({
+      canUndo: historyIndexRef.current > 0,
+      canRedo: historyIndexRef.current < historyRef.current.length - 1,
+    });
+  }, [onSlidesChange]);
+
+  const { canUndo, canRedo } = canUndoRedo;
 
   // スライドを追加
   const addSlide = useCallback(() => {
@@ -296,17 +369,65 @@ export default function CanvaEditor({
     setDragStart({ x: e.clientX - element.x * zoom, y: e.clientY - element.y * zoom });
   }, [currentSlide, zoom]);
 
-  // ドラッグ中
+  // リサイズ開始
+  const handleResizeStart = useCallback((e: React.MouseEvent, elementId: string, handle: string) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const element = currentSlide.elements.find(el => el.id === elementId);
+    if (!element || element.locked) return;
+
+    setSelectedElementId(elementId);
+    setIsResizing(true);
+    setResizeHandle(handle);
+    setResizeStart({
+      x: e.clientX,
+      y: e.clientY,
+      width: element.width,
+      height: element.height,
+      elementX: element.x,
+      elementY: element.y,
+    });
+  }, [currentSlide]);
+
+  // ドラッグ中・リサイズ中
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (isResizing && selectedElementId && resizeHandle) {
+      const deltaX = (e.clientX - resizeStart.x) / zoom;
+      const deltaY = (e.clientY - resizeStart.y) / zoom;
+
+      let newWidth = resizeStart.width;
+      let newHeight = resizeStart.height;
+      let newX = resizeStart.elementX;
+      let newY = resizeStart.elementY;
+
+      if (resizeHandle.includes('e')) {
+        newWidth = Math.max(50, resizeStart.width + deltaX);
+      }
+      if (resizeHandle.includes('w')) {
+        newWidth = Math.max(50, resizeStart.width - deltaX);
+        newX = resizeStart.elementX + resizeStart.width - newWidth;
+      }
+      if (resizeHandle.includes('s')) {
+        newHeight = Math.max(50, resizeStart.height + deltaY);
+      }
+      if (resizeHandle.includes('n')) {
+        newHeight = Math.max(50, resizeStart.height - deltaY);
+        newY = resizeStart.elementY + resizeStart.height - newHeight;
+      }
+
+      updateElement(selectedElementId, { width: newWidth, height: newHeight, x: newX, y: newY });
+      return;
+    }
+
     if (!isDragging || !selectedElementId) return;
 
     const newX = (e.clientX - dragStart.x) / zoom;
     const newY = (e.clientY - dragStart.y) / zoom;
 
     updateElement(selectedElementId, { x: newX, y: newY });
-  }, [isDragging, selectedElementId, dragStart, zoom, updateElement]);
+  }, [isDragging, isResizing, selectedElementId, dragStart, resizeStart, resizeHandle, zoom, updateElement]);
 
-  // ドラッグ終了
+  // ドラッグ・リサイズ終了
   const handleMouseUp = useCallback(() => {
     setIsDragging(false);
     setIsResizing(false);
@@ -321,6 +442,11 @@ export default function CanvaEditor({
   // キーボードショートカット
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't handle shortcuts when typing in input fields
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
       if (e.key === 'Delete' && selectedElementId) {
         deleteElement(selectedElementId);
       }
@@ -328,11 +454,22 @@ export default function CanvaEditor({
         e.preventDefault();
         duplicateElement(selectedElementId);
       }
+      // Undo: Ctrl+Z
+      if (e.key === 'z' && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      }
+      // Redo: Ctrl+Y or Ctrl+Shift+Z
+      if ((e.key === 'y' && (e.ctrlKey || e.metaKey)) ||
+          (e.key === 'z' && (e.ctrlKey || e.metaKey) && e.shiftKey)) {
+        e.preventDefault();
+        redo();
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedElementId, deleteElement, duplicateElement]);
+  }, [selectedElementId, deleteElement, duplicateElement, undo, redo]);
 
   // フィルタリングされたフォント
   const filteredFonts = availableFonts.filter(font => {
@@ -551,14 +688,12 @@ export default function CanvaEditor({
             <div className="space-y-4">
               <button
                 onClick={() => {
-                  const url = prompt('画像のURLを入力してください:');
-                  if (url) {
-                    addElement('image', { src: url });
-                  }
+                  setImageUrlInput('');
+                  setShowImageUrlModal(true);
                 }}
                 className="w-full flex items-center justify-center gap-2 py-8 border-2 border-dashed border-gray-700 rounded-lg text-gray-400 hover:border-purple-500 hover:text-purple-400 transition-colors"
               >
-                <Upload className="w-6 h-6" />
+                <Link className="w-6 h-6" />
                 <span>画像URLを追加</span>
               </button>
 
@@ -675,10 +810,20 @@ export default function CanvaEditor({
         {/* ツールバー */}
         <div className="flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-800">
           <div className="flex items-center gap-2">
-            <button className="p-2 hover:bg-gray-800 rounded text-gray-400">
+            <button
+              onClick={undo}
+              disabled={!canUndo}
+              className={`p-2 hover:bg-gray-800 rounded ${canUndo ? 'text-gray-400 hover:text-white' : 'text-gray-600 cursor-not-allowed'}`}
+              title="元に戻す (Ctrl+Z)"
+            >
               <Undo className="w-5 h-5" />
             </button>
-            <button className="p-2 hover:bg-gray-800 rounded text-gray-400">
+            <button
+              onClick={redo}
+              disabled={!canRedo}
+              className={`p-2 hover:bg-gray-800 rounded ${canRedo ? 'text-gray-400 hover:text-white' : 'text-gray-600 cursor-not-allowed'}`}
+              title="やり直す (Ctrl+Y)"
+            >
               <Redo className="w-5 h-5" />
             </button>
             <div className="w-px h-6 bg-gray-700 mx-2" />
@@ -762,7 +907,7 @@ export default function CanvaEditor({
                     <div
                       contentEditable={selectedElementId === element.id}
                       suppressContentEditableWarning
-                      className="w-full h-full outline-none"
+                      className="w-full h-full outline-none cursor-text"
                       style={{
                         fontFamily: element.style.fontFamily,
                         fontSize: element.style.fontSize * zoom,
@@ -773,13 +918,25 @@ export default function CanvaEditor({
                         color: element.style.color,
                         backgroundColor: element.style.backgroundColor,
                         padding: '8px',
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word',
                       }}
-                      onBlur={(e) => {
+                      onInput={(e) => {
+                        // Update content in real-time as user types
                         updateElement(element.id, { content: e.currentTarget.textContent || '' });
                       }}
-                    >
-                      {element.content}
-                    </div>
+                      onBlur={(e) => {
+                        // Final sync on blur
+                        updateElement(element.id, { content: e.currentTarget.textContent || '' });
+                      }}
+                      onKeyDown={(e) => {
+                        // Prevent deletion shortcut from deleting element while editing
+                        if (e.key === 'Delete') {
+                          e.stopPropagation();
+                        }
+                      }}
+                      dangerouslySetInnerHTML={{ __html: escapeHtml(element.content || '') }}
+                    />
                   )}
 
                   {element.type === 'image' && element.src && (
@@ -796,10 +953,22 @@ export default function CanvaEditor({
                   {/* リサイズハンドル */}
                   {selectedElementId === element.id && (
                     <>
-                      <div className="absolute -top-1 -left-1 w-3 h-3 bg-white border-2 border-purple-500 rounded-full cursor-nw-resize" />
-                      <div className="absolute -top-1 -right-1 w-3 h-3 bg-white border-2 border-purple-500 rounded-full cursor-ne-resize" />
-                      <div className="absolute -bottom-1 -left-1 w-3 h-3 bg-white border-2 border-purple-500 rounded-full cursor-sw-resize" />
-                      <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-white border-2 border-purple-500 rounded-full cursor-se-resize" />
+                      <div
+                        className="absolute -top-1 -left-1 w-3 h-3 bg-white border-2 border-purple-500 rounded-full cursor-nw-resize"
+                        onMouseDown={(e) => handleResizeStart(e, element.id, 'nw')}
+                      />
+                      <div
+                        className="absolute -top-1 -right-1 w-3 h-3 bg-white border-2 border-purple-500 rounded-full cursor-ne-resize"
+                        onMouseDown={(e) => handleResizeStart(e, element.id, 'ne')}
+                      />
+                      <div
+                        className="absolute -bottom-1 -left-1 w-3 h-3 bg-white border-2 border-purple-500 rounded-full cursor-sw-resize"
+                        onMouseDown={(e) => handleResizeStart(e, element.id, 'sw')}
+                      />
+                      <div
+                        className="absolute -bottom-1 -right-1 w-3 h-3 bg-white border-2 border-purple-500 rounded-full cursor-se-resize"
+                        onMouseDown={(e) => handleResizeStart(e, element.id, 'se')}
+                      />
                     </>
                   )}
                 </div>
@@ -1055,8 +1224,76 @@ export default function CanvaEditor({
           </div>
         </div>
       )}
+
+      {/* 画像URL入力モーダル */}
+      {showImageUrlModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+          <div className="bg-gray-900 rounded-2xl w-full max-w-md overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
+              <h2 className="text-lg font-medium text-white">画像URLを入力</h2>
+              <button
+                onClick={() => setShowImageUrlModal(false)}
+                className="p-1 hover:bg-gray-800 rounded text-gray-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm text-gray-400 mb-2">画像のURL</label>
+                <input
+                  type="url"
+                  value={imageUrlInput}
+                  onChange={(e) => setImageUrlInput(e.target.value)}
+                  placeholder="https://example.com/image.jpg"
+                  className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && imageUrlInput.trim()) {
+                      addElement('image', { src: imageUrlInput.trim() });
+                      setShowImageUrlModal(false);
+                    }
+                  }}
+                />
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowImageUrlModal(false)}
+                  className="flex-1 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-lg"
+                >
+                  キャンセル
+                </button>
+                <button
+                  onClick={() => {
+                    if (imageUrlInput.trim()) {
+                      addElement('image', { src: imageUrlInput.trim() });
+                      setShowImageUrlModal(false);
+                    }
+                  }}
+                  disabled={!imageUrlInput.trim()}
+                  className="flex-1 px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 disabled:text-gray-500 text-white rounded-lg"
+                >
+                  追加
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+// HTML特殊文字をエスケープする関数（XSS対策）
+function escapeHtml(text: string): string {
+  const escapeMap: Record<string, string> = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  };
+  return text.replace(/[&<>"']/g, (char) => escapeMap[char] || char);
 }
 
 // Marp形式に変換するヘルパー関数
@@ -1071,18 +1308,20 @@ paginate: true
 
   const slideContents = slides.map(slide => {
     const bgStyle = slide.backgroundImage
-      ? `<!-- _backgroundImage: ${slide.backgroundImage} -->`
-      : `<!-- _backgroundColor: ${slide.backgroundColor} -->`;
+      ? `<!-- _backgroundImage: ${escapeHtml(slide.backgroundImage)} -->`
+      : `<!-- _backgroundColor: ${escapeHtml(slide.backgroundColor)} -->`;
 
     const elementsContent = slide.elements
       .sort((a, b) => a.zIndex - b.zIndex)
       .map(el => {
         if (el.type === 'text') {
-          const styleAttr = `style="font-family: ${el.style.fontFamily}; font-size: ${el.style.fontSize}px; color: ${el.style.color}; text-align: ${el.style.textAlign}; font-weight: ${el.style.fontWeight}; font-style: ${el.style.fontStyle};"`;
-          return `<div ${styleAttr}>${el.content}</div>`;
+          // Escape all style values and content to prevent XSS
+          const styleAttr = `style="font-family: ${escapeHtml(el.style.fontFamily)}; font-size: ${el.style.fontSize}px; color: ${escapeHtml(el.style.color)}; text-align: ${el.style.textAlign}; font-weight: ${el.style.fontWeight}; font-style: ${el.style.fontStyle};"`;
+          return `<div ${styleAttr}>${escapeHtml(el.content || '')}</div>`;
         }
         if (el.type === 'image' && el.src) {
-          return `![](${el.src})`;
+          // Escape image URL to prevent injection
+          return `![](${escapeHtml(el.src)})`;
         }
         return '';
       })
