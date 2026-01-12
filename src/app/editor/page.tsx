@@ -2,9 +2,9 @@
 
 import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { ArrowLeft, Download, FileText } from 'lucide-react';
+import { ArrowLeft, FileText } from 'lucide-react';
 import Link from 'next/link';
-import SlideEditor, { type SlideData, slidesToMarp } from '@/components/SlideEditor';
+import CanvaEditor, { type SlideData, slidesToMarp } from '@/components/CanvaEditor';
 import { useStore } from '@/store/useStore';
 import { generateFullHtml } from '@/lib/marp';
 
@@ -19,63 +19,82 @@ function EditorContent() {
   const [showPreview, setShowPreview] = useState(false);
   const [previewHtml, setPreviewHtml] = useState('');
 
-  // 既存のドキュメントを読み込む
+  // 初期スライドの作成
   useEffect(() => {
     if (documentId) {
       const doc = documents.find((d) => d.id === documentId);
       if (doc) {
         setDocumentTitle(doc.title);
-        // Marpコンテンツからスライドを解析（簡易版）
-        const slidesFromMarp = parseMarpToSlides(doc.marpContent);
-        setSlides(slidesFromMarp);
+        // 既存のドキュメントからスライドを読み込む（簡易版）
+        // TODO: より精密なパース処理を実装
+        setSlides([createDefaultSlide()]);
         return;
       }
     }
 
     // 新規作成時のデフォルトスライド
-    setSlides([
-      {
-        id: crypto.randomUUID(),
-        content: '# タイトル\n\nここに内容を入力',
-        style: {
-          backgroundColor: '#ffffff',
-          textColor: '#333333',
-          fontFamily: 'system-ui, sans-serif',
-          fontSize: '24px',
-          textAlign: 'left',
-          padding: '40px',
-        },
-        images: [],
-      },
-    ]);
+    setSlides([createDefaultSlide()]);
   }, [documentId, documents]);
 
-  // Marpコンテンツからスライドを解析（簡易版）
-  const parseMarpToSlides = (marpContent: string): SlideData[] => {
-    const slideTexts = marpContent.split(/\n---\n/);
-    return slideTexts.map((text, index) => {
-      // フロントマターとスタイルをスキップ
-      const cleanContent = text
-        .replace(/^---[\s\S]*?---\n*/, '')
-        .replace(/<!--[\s\S]*?-->/g, '')
-        .replace(/<style[\s\S]*?<\/style>/g, '')
-        .trim();
-
-      return {
+  // デフォルトスライドを作成
+  const createDefaultSlide = (): SlideData => ({
+    id: crypto.randomUUID(),
+    backgroundColor: '#ffffff',
+    elements: [
+      {
         id: crypto.randomUUID(),
-        content: cleanContent || `# スライド ${index + 1}`,
+        type: 'text',
+        x: 80,
+        y: 60,
+        width: 800,
+        height: 80,
+        rotation: 0,
+        content: 'タイトルを入力',
         style: {
-          backgroundColor: '#ffffff',
-          textColor: '#333333',
-          fontFamily: 'system-ui, sans-serif',
-          fontSize: '24px',
-          textAlign: 'left' as const,
-          padding: '40px',
+          fontFamily: '"Noto Sans JP", sans-serif',
+          fontSize: 48,
+          fontWeight: 'bold',
+          fontStyle: 'normal',
+          textDecoration: 'none',
+          textAlign: 'center',
+          color: '#333333',
+          backgroundColor: 'transparent',
+          borderColor: '#333333',
+          borderWidth: 0,
+          borderRadius: 0,
+          opacity: 1,
         },
-        images: [],
-      };
-    });
-  };
+        locked: false,
+        zIndex: 0,
+      },
+      {
+        id: crypto.randomUUID(),
+        type: 'text',
+        x: 80,
+        y: 180,
+        width: 800,
+        height: 300,
+        rotation: 0,
+        content: 'ここに内容を入力してください',
+        style: {
+          fontFamily: '"Noto Sans JP", sans-serif',
+          fontSize: 24,
+          fontWeight: 'normal',
+          fontStyle: 'normal',
+          textDecoration: 'none',
+          textAlign: 'left',
+          color: '#666666',
+          backgroundColor: 'transparent',
+          borderColor: '#333333',
+          borderWidth: 0,
+          borderRadius: 0,
+          opacity: 1,
+        },
+        locked: false,
+        zIndex: 1,
+      },
+    ],
+  });
 
   // 保存処理
   const handleSave = async () => {
@@ -111,8 +130,8 @@ function EditorContent() {
     setShowPreview(true);
   };
 
-  // ダウンロード処理
-  const handleDownload = () => {
+  // エクスポート処理
+  const handleExport = () => {
     const marpContent = slidesToMarp(slides);
     const html = generateFullHtml(marpContent);
 
@@ -130,14 +149,13 @@ function EditorContent() {
   return (
     <div className="h-screen flex flex-col bg-gray-950">
       {/* ヘッダー */}
-      <header className="flex items-center justify-between px-4 py-3 bg-gray-900 border-b border-gray-800">
+      <header className="flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-800">
         <div className="flex items-center gap-4">
           <Link
             href="/"
             className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />
-            <span>戻る</span>
           </Link>
 
           <div className="flex items-center gap-2">
@@ -146,36 +164,27 @@ function EditorContent() {
               type="text"
               value={documentTitle}
               onChange={(e) => setDocumentTitle(e.target.value)}
-              className="bg-transparent text-white text-lg font-medium focus:outline-none focus:border-b-2 focus:border-purple-500"
+              className="bg-transparent text-white text-lg font-medium focus:outline-none border-b border-transparent focus:border-purple-500 px-1"
               placeholder="タイトルを入力..."
             />
           </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleDownload}
-            className="flex items-center gap-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors"
-          >
-            <Download className="w-4 h-4" />
-            <span>ダウンロード</span>
-          </button>
         </div>
       </header>
 
       {/* エディタ */}
       <main className="flex-1 overflow-hidden">
-        <SlideEditor
+        <CanvaEditor
           slides={slides}
           onSlidesChange={setSlides}
           onSave={handleSave}
           onPreview={handlePreview}
+          onExport={handleExport}
         />
       </main>
 
       {/* プレビューモーダル */}
       {showPreview && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4">
           <div className="bg-gray-900 rounded-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
               <h2 className="text-lg font-medium text-white">プレビュー</h2>
@@ -186,7 +195,7 @@ function EditorContent() {
                 閉じる
               </button>
             </div>
-            <div className="flex-1 bg-gray-800">
+            <div className="flex-1 bg-gray-800 min-h-[500px]">
               <iframe
                 srcDoc={previewHtml}
                 className="w-full h-full border-0"
@@ -200,7 +209,8 @@ function EditorContent() {
       {/* 保存中表示 */}
       {isSaving && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center">
-          <div className="bg-gray-800 rounded-lg px-6 py-4 text-white">
+          <div className="bg-gray-800 rounded-lg px-6 py-4 text-white flex items-center gap-3">
+            <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
             保存中...
           </div>
         </div>
@@ -213,7 +223,10 @@ function EditorContent() {
 function EditorLoading() {
   return (
     <div className="h-screen flex items-center justify-center bg-gray-950">
-      <div className="text-white">読み込み中...</div>
+      <div className="text-white flex items-center gap-3">
+        <div className="w-6 h-6 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+        読み込み中...
+      </div>
     </div>
   );
 }
