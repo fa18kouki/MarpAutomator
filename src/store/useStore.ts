@@ -2,8 +2,15 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { v4 as uuidv4 } from 'uuid';
-import type { ChatSession, Document, LibraryItem, Message, Preset } from '@/types';
+import type { ChatSession, Document, LibraryItem, Message } from '@/types';
+import {
+  sessionsApi,
+  documentsApi,
+  libraryApi,
+  type SessionData,
+  type DocumentData,
+  type LibraryItemData,
+} from '@/lib/api';
 
 interface AppState {
   // チャットセッション
@@ -24,24 +31,29 @@ interface AppState {
   isSidebarOpen: boolean;
   activeView: 'chat' | 'library' | 'preview';
   isLoading: boolean;
+  isSyncing: boolean;
+  syncError: string | null;
+
+  // データ同期
+  syncFromDatabase: () => Promise<void>;
 
   // チャットセッション操作
-  createChatSession: () => string;
-  addMessage: (sessionId: string, message: Omit<Message, 'id' | 'timestamp'>) => void;
-  updateSessionTitle: (sessionId: string, title: string) => void;
-  deleteSession: (sessionId: string) => void;
+  createChatSession: () => Promise<string>;
+  addMessage: (sessionId: string, message: Omit<Message, 'id' | 'timestamp'>) => Promise<void>;
+  updateSessionTitle: (sessionId: string, title: string) => Promise<void>;
+  deleteSession: (sessionId: string) => Promise<void>;
   setCurrentSession: (sessionId: string | null) => void;
 
   // ドキュメント操作
-  createDocument: (title: string, marpContent: string, htmlContent: string) => string;
-  updateDocument: (documentId: string, updates: Partial<Document>) => void;
-  deleteDocument: (documentId: string) => void;
+  createDocument: (title: string, marpContent: string, htmlContent: string, chatSessionId?: string) => Promise<string>;
+  updateDocument: (documentId: string, updates: Partial<Document>) => Promise<void>;
+  deleteDocument: (documentId: string) => Promise<void>;
   setCurrentDocument: (documentId: string | null) => void;
 
   // ライブラリ操作
-  addLibraryItem: (item: Omit<LibraryItem, 'id' | 'createdAt' | 'updatedAt'>) => string;
-  updateLibraryItem: (itemId: string, updates: Partial<LibraryItem>) => void;
-  deleteLibraryItem: (itemId: string) => void;
+  addLibraryItem: (item: Omit<LibraryItem, 'id' | 'createdAt' | 'updatedAt'>) => Promise<string>;
+  updateLibraryItem: (itemId: string, updates: Partial<LibraryItem>) => Promise<void>;
+  deleteLibraryItem: (itemId: string) => Promise<void>;
 
   // プリセット操作
   setSelectedPreset: (presetId: string | null) => void;
@@ -51,6 +63,42 @@ interface AppState {
   setActiveView: (view: 'chat' | 'library' | 'preview') => void;
   setIsLoading: (isLoading: boolean) => void;
 }
+
+// Helper functions to convert API data to app types
+const convertSessionData = (data: SessionData): ChatSession => ({
+  id: data.id,
+  title: data.title,
+  messages: data.messages.map((m) => ({
+    id: m.id,
+    role: m.role,
+    content: m.content,
+    timestamp: new Date(m.timestamp),
+  })),
+  createdAt: new Date(data.createdAt),
+  updatedAt: new Date(data.updatedAt),
+});
+
+const convertDocumentData = (data: DocumentData): Document => ({
+  id: data.id,
+  title: data.title,
+  marpContent: data.marpContent,
+  htmlContent: data.htmlContent,
+  presetId: data.presetId || undefined,
+  templateIds: data.templateIds,
+  createdAt: new Date(data.createdAt),
+  updatedAt: new Date(data.updatedAt),
+  chatSessionId: data.chatSessionId || undefined,
+});
+
+const convertLibraryItemData = (data: LibraryItemData): LibraryItem => ({
+  id: data.id,
+  title: data.title,
+  type: data.type === 'uploaded_html' ? 'uploaded-html' : 'document',
+  htmlContent: data.htmlContent,
+  thumbnail: data.thumbnail || undefined,
+  createdAt: new Date(data.createdAt),
+  updatedAt: new Date(data.updatedAt),
+});
 
 export const useStore = create<AppState>()(
   persist(
@@ -65,30 +113,73 @@ export const useStore = create<AppState>()(
       isSidebarOpen: true,
       activeView: 'chat',
       isLoading: false,
+      isSyncing: false,
+      syncError: null,
 
-      // チャットセッション操作
-      createChatSession: () => {
-        const id = uuidv4();
-        const newSession: ChatSession = {
-          id,
-          title: '新しいチャット',
-          messages: [],
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        };
-        set((state) => ({
-          chatSessions: [newSession, ...state.chatSessions],
-          currentSessionId: id,
-        }));
-        return id;
+      // データベースから同期
+      syncFromDatabase: async () => {
+        set({ isSyncing: true, syncError: null });
+        try {
+          const [sessions, documents, libraryItems] = await Promise.all([
+            sessionsApi.getAll(),
+            documentsApi.getAll(),
+            libraryApi.getAll(),
+          ]);
+
+          set({
+            chatSessions: sessions.map(convertSessionData),
+            documents: documents.map(convertDocumentData),
+            libraryItems: libraryItems.map(convertLibraryItemData),
+            isSyncing: false,
+          });
+        } catch (error) {
+          console.error('Failed to sync from database:', error);
+          set({
+            syncError: error instanceof Error ? error.message : 'Sync failed',
+            isSyncing: false,
+          });
+        }
       },
 
-      addMessage: (sessionId, message) => {
+      // チャットセッション操作
+      createChatSession: async () => {
+        try {
+          const session = await sessionsApi.create();
+          const newSession = convertSessionData(session);
+
+          set((state) => ({
+            chatSessions: [newSession, ...state.chatSessions],
+            currentSessionId: newSession.id,
+          }));
+
+          return newSession.id;
+        } catch (error) {
+          console.error('Failed to create session:', error);
+          // フォールバック: ローカルで作成
+          const id = crypto.randomUUID();
+          const newSession: ChatSession = {
+            id,
+            title: '新しいチャット',
+            messages: [],
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          };
+          set((state) => ({
+            chatSessions: [newSession, ...state.chatSessions],
+            currentSessionId: id,
+          }));
+          return id;
+        }
+      },
+
+      addMessage: async (sessionId, message) => {
         const newMessage: Message = {
           ...message,
-          id: uuidv4(),
+          id: crypto.randomUUID(),
           timestamp: new Date(),
         };
+
+        // 即座にUIを更新
         set((state) => ({
           chatSessions: state.chatSessions.map((session) =>
             session.id === sessionId
@@ -100,9 +191,17 @@ export const useStore = create<AppState>()(
               : session
           ),
         }));
+
+        // バックグラウンドでDBに保存
+        try {
+          await sessionsApi.addMessage(sessionId, message.role, message.content);
+        } catch (error) {
+          console.error('Failed to save message to database:', error);
+        }
       },
 
-      updateSessionTitle: (sessionId, title) => {
+      updateSessionTitle: async (sessionId, title) => {
+        // 即座にUIを更新
         set((state) => ({
           chatSessions: state.chatSessions.map((session) =>
             session.id === sessionId
@@ -110,14 +209,29 @@ export const useStore = create<AppState>()(
               : session
           ),
         }));
+
+        // バックグラウンドでDBに保存
+        try {
+          await sessionsApi.update(sessionId, { title });
+        } catch (error) {
+          console.error('Failed to update session title:', error);
+        }
       },
 
-      deleteSession: (sessionId) => {
+      deleteSession: async (sessionId) => {
+        // 即座にUIを更新
         set((state) => ({
           chatSessions: state.chatSessions.filter((s) => s.id !== sessionId),
           currentSessionId:
             state.currentSessionId === sessionId ? null : state.currentSessionId,
         }));
+
+        // バックグラウンドでDBから削除
+        try {
+          await sessionsApi.delete(sessionId);
+        } catch (error) {
+          console.error('Failed to delete session:', error);
+        }
       },
 
       setCurrentSession: (sessionId) => {
@@ -125,33 +239,60 @@ export const useStore = create<AppState>()(
       },
 
       // ドキュメント操作
-      createDocument: (title, marpContent, htmlContent) => {
-        const id = uuidv4();
-        const newDocument: Document = {
-          id,
-          title,
-          marpContent,
-          htmlContent,
-          templateIds: [],
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        };
-        set((state) => ({
-          documents: [newDocument, ...state.documents],
-          currentDocumentId: id,
-        }));
+      createDocument: async (title, marpContent, htmlContent, chatSessionId) => {
+        try {
+          const document = await documentsApi.create({
+            title,
+            marpContent,
+            htmlContent,
+            chatSessionId,
+          });
 
-        // ライブラリにも追加
-        get().addLibraryItem({
-          title,
-          type: 'document',
-          htmlContent,
-        });
+          const newDocument = convertDocumentData(document);
 
-        return id;
+          set((state) => ({
+            documents: [newDocument, ...state.documents],
+            currentDocumentId: newDocument.id,
+          }));
+
+          // ライブラリを再同期
+          const libraryItems = await libraryApi.getAll();
+          set({
+            libraryItems: libraryItems.map(convertLibraryItemData),
+          });
+
+          return newDocument.id;
+        } catch (error) {
+          console.error('Failed to create document:', error);
+          // フォールバック: ローカルで作成
+          const id = crypto.randomUUID();
+          const newDocument: Document = {
+            id,
+            title,
+            marpContent,
+            htmlContent,
+            templateIds: [],
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          };
+          set((state) => ({
+            documents: [newDocument, ...state.documents],
+            currentDocumentId: id,
+          }));
+
+          // ライブラリにも追加
+          await get().addLibraryItem({
+            title,
+            type: 'document',
+            htmlContent,
+          });
+
+          return id;
+        }
       },
 
-      updateDocument: (documentId, updates) => {
+      updateDocument: async (documentId, updates) => {
+        // 即座にUIを更新
         set((state) => ({
           documents: state.documents.map((doc) =>
             doc.id === documentId
@@ -159,14 +300,34 @@ export const useStore = create<AppState>()(
               : doc
           ),
         }));
+
+        // バックグラウンドでDBに保存
+        try {
+          await documentsApi.update(documentId, updates);
+        } catch (error) {
+          console.error('Failed to update document:', error);
+        }
       },
 
-      deleteDocument: (documentId) => {
+      deleteDocument: async (documentId) => {
+        // 即座にUIを更新
         set((state) => ({
           documents: state.documents.filter((d) => d.id !== documentId),
           currentDocumentId:
             state.currentDocumentId === documentId ? null : state.currentDocumentId,
         }));
+
+        // バックグラウンドでDBから削除
+        try {
+          await documentsApi.delete(documentId);
+          // ライブラリを再同期
+          const libraryItems = await libraryApi.getAll();
+          set({
+            libraryItems: libraryItems.map(convertLibraryItemData),
+          });
+        } catch (error) {
+          console.error('Failed to delete document:', error);
+        }
       },
 
       setCurrentDocument: (documentId) => {
@@ -174,22 +335,41 @@ export const useStore = create<AppState>()(
       },
 
       // ライブラリ操作
-      addLibraryItem: (item) => {
-        const id = uuidv4();
-        const now = new Date();
-        const newItem: LibraryItem = {
-          ...item,
-          id,
-          createdAt: now,
-          updatedAt: now,
-        };
-        set((state) => ({
-          libraryItems: [newItem, ...state.libraryItems],
-        }));
-        return id;
+      addLibraryItem: async (item) => {
+        try {
+          const libraryItem = await libraryApi.create({
+            title: item.title,
+            htmlContent: item.htmlContent,
+            type: item.type === 'uploaded-html' ? 'uploaded_html' : undefined,
+          });
+
+          const newItem = convertLibraryItemData(libraryItem);
+
+          set((state) => ({
+            libraryItems: [newItem, ...state.libraryItems],
+          }));
+
+          return newItem.id;
+        } catch (error) {
+          console.error('Failed to add library item:', error);
+          // フォールバック: ローカルで作成
+          const id = crypto.randomUUID();
+          const now = new Date();
+          const newItem: LibraryItem = {
+            ...item,
+            id,
+            createdAt: now,
+            updatedAt: now,
+          };
+          set((state) => ({
+            libraryItems: [newItem, ...state.libraryItems],
+          }));
+          return id;
+        }
       },
 
-      updateLibraryItem: (itemId, updates) => {
+      updateLibraryItem: async (itemId, updates) => {
+        // 即座にUIを更新
         set((state) => ({
           libraryItems: state.libraryItems.map((item) =>
             item.id === itemId
@@ -197,12 +377,27 @@ export const useStore = create<AppState>()(
               : item
           ),
         }));
+
+        // バックグラウンドでDBに保存
+        try {
+          await libraryApi.update(itemId, updates);
+        } catch (error) {
+          console.error('Failed to update library item:', error);
+        }
       },
 
-      deleteLibraryItem: (itemId) => {
+      deleteLibraryItem: async (itemId) => {
+        // 即座にUIを更新
         set((state) => ({
           libraryItems: state.libraryItems.filter((i) => i.id !== itemId),
         }));
+
+        // バックグラウンドでDBから削除
+        try {
+          await libraryApi.delete(itemId);
+        } catch (error) {
+          console.error('Failed to delete library item:', error);
+        }
       },
 
       // プリセット操作
@@ -230,6 +425,7 @@ export const useStore = create<AppState>()(
         documents: state.documents,
         libraryItems: state.libraryItems,
         selectedPresetId: state.selectedPresetId,
+        isSidebarOpen: state.isSidebarOpen,
       }),
     }
   )

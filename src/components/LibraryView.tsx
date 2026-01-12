@@ -10,7 +10,9 @@ import {
   Search,
   MoreVertical,
   Code,
+  Edit3,
 } from 'lucide-react';
+import Link from 'next/link';
 import { useStore } from '@/store/useStore';
 import type { LibraryItem } from '@/types';
 
@@ -186,6 +188,15 @@ export default function LibraryView({ onPreview }: LibraryViewProps) {
                             <Eye className="w-4 h-4" />
                             <span>プレビュー</span>
                           </button>
+                          {item.type === 'document' && (
+                            <Link
+                              href={`/editor?id=${item.id}`}
+                              className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-white hover:bg-gray-600 transition-colors"
+                            >
+                              <Edit3 className="w-4 h-4" />
+                              <span>編集</span>
+                            </Link>
+                          )}
                           <button
                             onClick={() => handleDownload(item)}
                             className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-white hover:bg-gray-600 transition-colors"

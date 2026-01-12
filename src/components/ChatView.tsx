@@ -60,16 +60,16 @@ export default function ChatView({ onPreviewDocument }: ChatViewProps) {
     // セッションがない場合は新規作成
     let sessionId = currentSessionId;
     if (!sessionId) {
-      sessionId = createChatSession();
+      sessionId = await createChatSession();
     }
 
     // ユーザーメッセージを追加
-    addMessage(sessionId, { role: 'user', content });
+    await addMessage(sessionId, { role: 'user', content });
 
     // 最初のメッセージでタイトルを更新
     const session = chatSessions.find((s) => s.id === sessionId);
     if (session?.messages.length === 0) {
-      updateSessionTitle(sessionId, content.slice(0, 30) + (content.length > 30 ? '...' : ''));
+      await updateSessionTitle(sessionId, content.slice(0, 30) + (content.length > 30 ? '...' : ''));
     }
 
     setIsLoading(true);
@@ -88,7 +88,7 @@ export default function ChatView({ onPreviewDocument }: ChatViewProps) {
       const result = await createSlidesFromChat(content, history, true);
 
       // アシスタントメッセージを追加
-      addMessage(sessionId, {
+      await addMessage(sessionId, {
         role: 'assistant',
         content: result.response,
       });
@@ -118,7 +118,7 @@ export default function ChatView({ onPreviewDocument }: ChatViewProps) {
       }
     } catch (error) {
       console.error('Error generating response:', error);
-      addMessage(sessionId, {
+      await addMessage(sessionId, {
         role: 'assistant',
         content:
           'エラーが発生しました。もう一度お試しください。APIキーが正しく設定されているか確認してください。',
@@ -128,10 +128,10 @@ export default function ChatView({ onPreviewDocument }: ChatViewProps) {
     }
   };
 
-  const handleSaveDocument = () => {
+  const handleSaveDocument = async () => {
     if (!generatedDocument) return;
 
-    createDocument(
+    await createDocument(
       generatedDocument.title,
       generatedDocument.marpContent,
       generatedDocument.htmlContent

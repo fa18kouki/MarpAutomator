@@ -9,7 +9,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Settings,
+  Edit3,
 } from 'lucide-react';
+import Link from 'next/link';
 import { useStore } from '@/store/useStore';
 
 interface SidebarProps {
@@ -31,8 +33,8 @@ export default function Sidebar({ onSettingsClick }: SidebarProps) {
 
   const [hoveredSession, setHoveredSession] = useState<string | null>(null);
 
-  const handleNewChat = () => {
-    createChatSession();
+  const handleNewChat = async () => {
+    await createChatSession();
     setActiveView('chat');
   };
 
@@ -183,7 +185,14 @@ export default function Sidebar({ onSettingsClick }: SidebarProps) {
       </div>
 
       {/* フッター */}
-      <div className="p-3 border-t border-gray-800">
+      <div className="p-3 border-t border-gray-800 space-y-1">
+        <Link
+          href="/editor"
+          className="w-full flex items-center gap-2 px-3 py-2 text-gray-400 hover:bg-gray-800 rounded-lg transition-colors"
+        >
+          <Edit3 className="w-5 h-5" />
+          <span className="text-sm">新規作成（エディタ）</span>
+        </Link>
         <button
           onClick={onSettingsClick}
           className="w-full flex items-center gap-2 px-3 py-2 text-gray-400 hover:bg-gray-800 rounded-lg transition-colors"

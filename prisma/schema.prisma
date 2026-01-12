@@ -1,0 +1,97 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// チャットセッション
+model ChatSession {
+  id        String    @id @default(cuid())
+  title     String    @default("新しいチャット")
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  messages  Message[]
+  document  Document?
+
+  @@map("chat_sessions")
+}
+
+// チャットメッセージ
+model Message {
+  id        String      @id @default(cuid())
+  role      MessageRole
+  content   String      @db.Text
+  timestamp DateTime    @default(now())
+
+  sessionId String
+  session   ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("messages")
+}
+
+enum MessageRole {
+  user
+  assistant
+}
+
+// ドキュメント（生成された資料）
+model Document {
+  id          String   @id @default(cuid())
+  title       String
+  marpContent String   @db.Text
+  htmlContent String   @db.Text
+  presetId    String?
+  templateIds String[] @default([])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  chatSessionId String?      @unique
+  chatSession   ChatSession? @relation(fields: [chatSessionId], references: [id], onDelete: SetNull)
+
+  libraryItem   LibraryItem?
+
+  @@map("documents")
+}
+
+// ライブラリアイテム
+model LibraryItem {
+  id          String          @id @default(cuid())
+  title       String
+  type        LibraryItemType
+  htmlContent String          @db.Text
+  thumbnail   String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  documentId  String?   @unique
+  document    Document? @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@map("library_items")
+}
+
+enum LibraryItemType {
+  document
+  uploaded_html
+}
+
+// プリセット設定（将来のカスタムプリセット用）
+model Preset {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  theme       String   @default("default")
+  templateIds String[] @default([])
+  isBuiltIn   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("presets")
+}
